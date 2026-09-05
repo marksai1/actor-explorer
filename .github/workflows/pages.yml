@@ -42,14 +42,20 @@ jobs:
           BASE_PATH: /${{ github.event.repository.name }}/
         run: npm run build:static
 
-      - name: Fail if no snapshot was committed
+      - name: Fail if the snapshot is missing or incomplete
         run: |
-          if [ ! -s dist-static/data/library.enc ]; then
-            echo "::error::No encrypted snapshot found. Run 'npm run snapshot' and commit client/public/data/library.enc."
+          missing=
+          [ -s dist-static/data/library.enc ] || missing="$missing library.enc"
+          [ -s dist-static/data/meta.json ]   || missing="$missing meta.json"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing from the snapshot:$missing. Run 'npm run snapshot' and commit all of client/public/data/."
             exit 1
           fi
 
       - uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on if it is not already, rather than 404ing on a new repo.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist-static

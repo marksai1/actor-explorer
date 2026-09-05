@@ -99,4 +99,6 @@ fs.writeFileSync(
 );
 
 console.log(`  Encrypted:     ${size(encrypted.length)}`);
-console.log(`\n  Wrote ${path.relative(ROOT, OUT_FILE)} — safe to commit.\n`);
+console.log(`\n  Wrote ${path.relative(ROOT, OUT_DIR)} — both files, both safe to commit:`);
+console.log('    library.enc   your library, encrypted');
+console.log('    meta.json     just a timestamp, so the phone can spot a refresh\n');
