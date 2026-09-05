@@ -1,0 +1,65 @@
+name: Publish to GitHub Pages
+
+# Builds the offline app and publishes it. Nothing here needs a secret: the
+# snapshot is committed already encrypted, and the workflow only ever handles
+# ciphertext.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a queued run replaces an older one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        # A project site is served from /<repo>/, and asset URLs have to be
+        # built with that prefix. Taking it from the repository name means
+        # renaming or forking the repo doesn't break the build.
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run build:static
+
+      - name: Fail if no snapshot was committed
+        run: |
+          if [ ! -s dist-static/data/library.enc ]; then
+            echo "::error::No encrypted snapshot found. Run 'npm run snapshot' and commit client/public/data/library.enc."
+            exit 1
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-static
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
