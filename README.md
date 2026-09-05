@@ -80,8 +80,9 @@ decrypts it once and keeps it. After that the app runs entirely on the device. N
 server, no laptop, no connection.
 
 ```bash
-npm run snapshot     # asks for a passphrase, writes library.enc
-git add client/public/data/library.enc
+npm run sync         # pull Letterboxd + IMDb, and index the new casts
+npm run snapshot     # asks for a passphrase, encrypts the result
+git add client/public/data     # both files: the snapshot and its timestamp
 git commit -m "Refresh snapshot"
 git push             # the Action builds and publishes
 ```
@@ -111,8 +112,15 @@ so the two cannot disagree about where you know someone from.
 
 **It is read-only.** Sync, imports, "needs a look" and *Mark as seen* all belong to the
 machine that holds the database; the published copy hides them rather than offering
-buttons that cannot work. Refreshing is `npm run snapshot` and a push — the app checks
-for a newer snapshot on launch and swaps itself over without asking for anything.
+buttons that cannot work.
+
+**Refreshing takes two commands, not one.** `npm run snapshot` only exports what is
+already in the database — it does not sync. `npm run sync` is what pulls from
+Letterboxd and IMDb, and it waits for the cast indexer before it exits, so the two in
+that order give you a complete refresh. While `npm start` is running, sync happens on
+its own and the snapshot step alone is enough; with the server stopped, skipping the
+sync publishes stale data without saying so. The phone then picks the new snapshot up
+on its next launch and swaps itself over without asking for anything.
 
 **Sizes.** 227 titles, 18,642 people and 23,180 credits come to 1.8 MB of JSON, 847 KB
 once gzipped and encrypted. The 28 MB in `.data/db.sqlite` is mostly the TMDB response
