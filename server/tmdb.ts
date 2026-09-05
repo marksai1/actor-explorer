@@ -1,6 +1,17 @@
 import { db, nowIso } from './db.ts';
 import { config } from './config.ts';
 import type { MediaType } from './db.ts';
+import { nameOf, yearOf } from './tmdb-shapes.ts';
+import type {
+  PersonCredit,
+  TmdbCastMember,
+  TmdbPersonResult,
+  TmdbTitle,
+} from './tmdb-shapes.ts';
+
+// The shapes and their pure readers live next door so the browser build can
+// share them; callers still import them from here.
+export * from './tmdb-shapes.ts';
 
 const BASE = 'https://api.themoviedb.org/3';
 
@@ -142,61 +153,9 @@ export async function tmdb<T = any>(
 // Shapes — only the fields this app actually reads.
 // ---------------------------------------------------------------------------
 
-export interface TmdbTitle {
-  id: number;
-  media_type?: string;
-  title?: string;
-  name?: string;
-  release_date?: string;
-  first_air_date?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  overview?: string;
-  popularity?: number;
-  vote_count?: number;
-}
-
-export interface TmdbCastMember {
-  id: number;
-  name: string;
-  profile_path?: string | null;
-  popularity?: number;
-  character?: string;
-  order?: number;
-  roles?: { character?: string; episode_count?: number }[];
-  total_episode_count?: number;
-}
-
-export interface PersonCredit extends TmdbTitle {
-  character?: string;
-  episode_count?: number;
-  order?: number;
-}
-
-/** Year as a number, from whichever date field the media type uses. */
-export function yearOf(t: TmdbTitle): number | null {
-  const date = t.release_date || t.first_air_date;
-  if (!date) return null;
-  const year = Number(date.slice(0, 4));
-  return Number.isFinite(year) && year > 1870 ? year : null;
-}
-
-export function nameOf(t: TmdbTitle): string {
-  return t.title || t.name || 'Untitled';
-}
-
 // ---------------------------------------------------------------------------
 // Endpoint wrappers
 // ---------------------------------------------------------------------------
-
-export interface TmdbPersonResult {
-  id: number;
-  name: string;
-  profile_path?: string | null;
-  popularity?: number;
-  known_for_department?: string;
-  known_for?: TmdbTitle[];
-}
 
 /** Multi-search, split into titles and people. */
 export async function searchMulti(query: string): Promise<{
@@ -315,23 +274,6 @@ export async function getPersonCredits(personId: number): Promise<PersonCredit[]
     TTL.person,
   );
   return res.cast ?? [];
-}
-
-/** Normalises an aggregate_credits or credits entry into flat fields. */
-export function castRole(member: TmdbCastMember): {
-  character: string | null;
-  episodeCount: number | null;
-} {
-  if (member.roles?.length) {
-    const primary = member.roles.reduce((best, role) =>
-      (role.episode_count ?? 0) > (best.episode_count ?? 0) ? role : best,
-    );
-    return {
-      character: primary.character ?? null,
-      episodeCount: member.total_episode_count ?? primary.episode_count ?? null,
-    };
-  }
-  return { character: member.character ?? null, episodeCount: null };
 }
 
 /** Upsert a title row from any TMDB payload we happen to have. */

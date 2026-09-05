@@ -25,6 +25,7 @@
     "src/**/*.tsx",
     "vite.config.ts",
     "vite.static.config.ts",
-    "../server/scoring.ts"
+    "../server/scoring.ts",
+    "../server/tmdb-shapes.ts"
   ]
 }

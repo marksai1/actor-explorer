@@ -40,6 +40,9 @@ jobs:
         # renaming or forking the repo doesn't break the build.
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
+          # Compiled into the bundle, so live search works on the phone. A v3
+          # key is read-only; it is a quota to protect, not a credential.
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: npm run build:static
 
       - name: Fail if the snapshot is missing or incomplete

@@ -102,13 +102,33 @@ passphrase, and it is stored non-extractable — usable for decryption, never re
 back out. The salt is deliberately carried over from the previous build, which is what
 lets a phone that already holds the key open tomorrow's snapshot with no prompt.
 
-**What does not come along.** Two things in the app are live TMDB calls with no local
-equivalent: an actor's biography, and the dimmed "rest of their work" section. Offline
-they are simply absent, and the UI already handles that. Posters are TMDB CDN URLs, so
-they need a connection the first time — the service worker keeps every one you have
-looked at, so pages you revisit are complete offline. Everything the ranking depends
-on is local, and the phone imports the very same `server/scoring.ts` the desktop uses,
-so the two cannot disagree about where you know someone from.
+**With a connection it is the whole app, minus the writes.** Search reaches all of
+TMDB, so a film you started twenty minutes ago is findable, and opening it pulls its
+cast live. The question that matters — *how many things I have watched is this face
+in* — is still answered on the device, because the credit index is keyed by the same
+TMDB person ids. So an unfamiliar film's cast grid lights up with the faces you know,
+which is the case this app exists for. Biographies and the dimmed "rest of their work"
+come back too.
+
+**With no connection it falls back to your library.** Search covers your own titles
+and the people already indexed; a title you have never watched cannot be opened,
+because its cast was never stored. Nothing breaks — there is an empty state for each
+of these — it is simply a smaller app. TMDB responses you have already fetched are
+cached, so a film you opened on the train is still readable in the tunnel.
+
+**Posters** are TMDB CDN URLs, so they need a connection the first time; the service
+worker keeps every one you have looked at, and the UI draws a placeholder for the
+rest. Everything the ranking depends on is local, and the phone imports the very same
+`server/scoring.ts` the desktop uses, so the two cannot disagree about where you know
+someone from.
+
+**The TMDB key is compiled into the published bundle**, which is what makes the live
+half possible on a static host. A v3 key is read-only and grants no access to anything
+of yours — the exposure is your request quota, not your data — and regenerating one at
+[themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) takes two
+minutes if it is ever abused. Every static build prints a line saying whether a key is
+going in, so it never happens quietly. Leave `TMDB_API_KEY` unset and you get an
+offline-only build with no key in it at all.
 
 **It is read-only.** Sync, imports, "needs a look" and *Mark as seen* all belong to the
 machine that holds the database; the published copy hides them rather than offering
@@ -131,8 +151,10 @@ cache, which is a build-time convenience and does not travel.
 1. Push this repository to GitHub. It is safe to make public — `.env` and `.data/` are
    gitignored, and nothing else contains a key, a handle or an id.
 2. **Settings → Pages → Source: GitHub Actions.**
-3. `npm run snapshot`, commit `client/public/data/library.enc`, push.
-4. The workflow builds and deploys. Your URL is `https://<you>.github.io/<repo>/`.
+3. `gh secret set TMDB_API_KEY` from this folder. CI builds from a clean checkout with
+   no `.env`, so the key reaches it this way; skip it for an offline-only build.
+4. `npm run snapshot`, commit `client/public/data/` — both files — and push.
+5. The workflow builds and deploys. Your URL is `https://<you>.github.io/<repo>/`.
 
 `BASE_PATH` is taken from the repository name automatically, so a rename needs no
 edit. On a custom domain or a `<you>.github.io` user site, set `BASE_PATH=/`.
@@ -370,6 +392,7 @@ server/
   match.ts         conservative title/year matching
   ingest.ts        watch events -> library rows
   queries.ts       the read side
+  tmdb-shapes.ts   TMDB payload shapes and their readers, shared with the browser
   snapshot.ts      flattens the database into the offline snapshot
   snapshot-crypto.ts  AES-GCM envelope for publishing it
   sources/
@@ -381,6 +404,7 @@ server/
     trakt.ts       stub — see below
 client/            React + Vite, hand-written CSS
   src/static/      the same read side, offline: decrypt, index, serve the pages
+    tmdb.ts        live TMDB from the phone, for anything outside your library
   public/sw.js     service worker — app shell and poster cache
 .data/             database, browser profile, downloads (gitignored)
 ```

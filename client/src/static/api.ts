@@ -1,4 +1,8 @@
 import { scoreCredit } from '../../../server/scoring.ts';
+import { castRole, nameOf, yearOf } from '../../../server/tmdb-shapes.ts';
+import type { PersonCredit, TmdbTitle } from '../../../server/tmdb-shapes.ts';
+import * as tmdb from './tmdb';
+import { tmdbAvailable } from './tmdb';
 import { mediaTypeOf, titleKey, type CreditRow, type Indexed, type TitleRow } from './snapshot';
 import type {
   CastEntry,
@@ -21,9 +25,12 @@ import type {
  * imports the very same `scoreCredit`, so the phone and the desktop can't
  * disagree about where you know someone from.
  *
- * Two things genuinely cannot come along: a person's biography and the dimmed
- * "rest of their work" section are live TMDB calls with no local equivalent, so
- * they come back empty. Both already have an empty state in the UI.
+ * Where a connection is available it goes further than the snapshot alone can.
+ * `./tmdb` reaches the whole catalogue again, so a film you have never watched
+ * is searchable and its cast opens — and the badge on every face in it is still
+ * a local count, because the credit index is keyed by the same TMDB person ids.
+ * Every one of those paths falls back to the snapshot when the fetch fails, so
+ * offline is a smaller app rather than a broken one.
  */
 
 let library: Indexed | null = null;
@@ -149,6 +156,76 @@ function searchPeopleRows(query: string, limit: number): PersonCard[] {
     .filter((card): card is PersonCard => card !== null);
 }
 
+/** A TMDB search hit, told apart by whether the snapshot already knows it. */
+function remoteTitleCard(item: TmdbTitle): TitleCard | null {
+  const mediaType = item.media_type;
+  if (mediaType !== 'movie' && mediaType !== 'tv') return null;
+
+  const index = need();
+  const at = index.titleIndexByKey.get(titleKey(mediaType, item.id));
+  const row = at === undefined ? undefined : index.data.titles[at];
+
+  return {
+    tmdbId: item.id,
+    mediaType,
+    name: nameOf(item),
+    year: yearOf(item),
+    poster: img(item.poster_path ?? null, 'w342'),
+    watched: Boolean(row?.[8]),
+    rating: row?.[9] ?? null,
+  };
+}
+
+/**
+ * Your library first, then the rest of TMDB behind it.
+ *
+ * Offline, or on a build with no key, this is the snapshot alone — which finds
+ * everything you have watched and every face already indexed. With a
+ * connection it also reaches the film you started twenty minutes ago.
+ */
+async function mergedSearch(query: string): Promise<{ titles: TitleCard[]; people: PersonCard[] }> {
+  const local = { titles: searchTitles(query, 24), people: searchPeopleRows(query, 24) };
+  if (!tmdbAvailable()) return local;
+
+  try {
+    const index = need();
+    const remote = await tmdb.searchMulti(query);
+
+    const titles = [...local.titles];
+    const haveTitle = new Set(titles.map((t) => `${t.mediaType}:${t.tmdbId}`));
+    for (const item of remote.titles) {
+      const card = remoteTitleCard(item);
+      if (!card) continue;
+      const key = `${card.mediaType}:${card.tmdbId}`;
+      if (haveTitle.has(key)) continue;
+      haveTitle.add(key);
+      titles.push(card);
+    }
+
+    const people = [...local.people];
+    const havePerson = new Set(people.map((p) => p.personId));
+    for (const person of remote.people) {
+      if (havePerson.has(person.id)) continue;
+      havePerson.add(person.id);
+      people.push({
+        personId: person.id,
+        name: person.name,
+        photo: img(person.profile_path ?? null, 'w185'),
+        knownFor: person.known_for_department ?? null,
+        seenCount: index.seenCount.get(person.id) ?? 0,
+      });
+    }
+
+    // Sorting is stable, so ties keep the local-first order these arrived in.
+    titles.sort((a, b) => Number(b.watched) - Number(a.watched));
+    people.sort((a, b) => b.seenCount - a.seenCount);
+
+    return { titles: titles.slice(0, 40), people: people.slice(0, 40) };
+  } catch {
+    return local;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Title page
 // ---------------------------------------------------------------------------
@@ -168,13 +245,18 @@ function castOrder(mediaType: MediaType) {
   };
 }
 
-function getTitle(mediaType: MediaType, tmdbId: number): TitleDetail {
+async function getTitle(mediaType: MediaType, tmdbId: number): Promise<TitleDetail> {
   const index = need();
   const at = index.titleIndexByKey.get(titleKey(mediaType, tmdbId));
   const row = at === undefined ? undefined : index.data.titles[at];
 
+  // Something you have not watched, so its cast was never indexed. This is the
+  // case the app exists for when you are halfway through a new film.
   if (at === undefined || !row) {
-    throw new Error("That title isn't in this snapshot. Open it on the machine that syncs.");
+    if (!tmdbAvailable()) {
+      throw new Error("That title isn't in this snapshot, and there's no connection.");
+    }
+    return liveTitle(mediaType, tmdbId);
   }
 
   const inLibrary = Boolean(row[8]);
@@ -211,16 +293,60 @@ function getTitle(mediaType: MediaType, tmdbId: number): TitleDetail {
   };
 }
 
+/**
+ * A title from TMDB rather than the snapshot.
+ *
+ * The cast is TMDB's, ordered the way the server orders it, but `seenCount` on
+ * every face is still the local index — which is the whole point: you are
+ * looking at a film you have never seen and asking where you know these people
+ * from, and that answer has always lived on the device.
+ */
+async function liveTitle(mediaType: MediaType, tmdbId: number): Promise<TitleDetail> {
+  const index = need();
+  const [detail, cast] = await Promise.all([
+    tmdb.getDetail(mediaType, tmdbId),
+    tmdb.getCast(mediaType, tmdbId),
+  ]);
+
+  const entries: CastEntry[] = cast
+    .slice()
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    .slice(0, 40)
+    .map((member) => {
+      const { character, episodeCount } = castRole(member);
+      return {
+        personId: member.id,
+        name: member.name,
+        photo: img(member.profile_path ?? null, 'w185'),
+        character,
+        episodeCount,
+        billingOrder: member.order ?? null,
+        seenCount: index.seenCount.get(member.id) ?? 0,
+      };
+    });
+
+  return {
+    tmdbId,
+    mediaType,
+    name: nameOf(detail),
+    year: yearOf(detail),
+    overview: detail.overview ?? '',
+    poster: img(detail.poster_path ?? null, 'w342'),
+    backdrop: img(detail.backdrop_path ?? null, 'w1280'),
+    watched: false,
+    rating: null,
+    cast: entries,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Person page
 // ---------------------------------------------------------------------------
 
-function getPerson(personId: number): PersonDetail {
+/** The overlap the cast index knows about — complete for anyone it has seen. */
+function localOverlap(personId: number): OverlapEntry[] {
   const index = need();
-  const person = index.personById.get(personId);
-  if (!person) throw new Error("That person isn't in this snapshot yet.");
-
-  const seen: OverlapEntry[] = (index.creditsByPerson.get(personId) ?? [])
+  return (index.creditsByPerson.get(personId) ?? [])
     .flatMap((credit) => {
       const row = index.data.titles[credit[1]];
       if (!row || !row[8]) return [];
@@ -248,17 +374,111 @@ function getPerson(personId: number): PersonDetail {
       ];
     })
     .sort((a, b) => b.score - a.score);
+}
 
-  return {
-    personId,
-    name: person[1],
-    photo: img(person[2], 'h632'),
-    biography: '',
-    knownFor: null,
-    seen,
-    // Needs a live TMDB call. The section hides itself when it is empty.
-    rest: [],
-  };
+/**
+ * The same overlap worked out from TMDB's credit list instead of the index.
+ *
+ * This is how a face from a film you have never watched still gets a ranked
+ * "where you know them from": their filmography comes down live, and anything
+ * in it that is also in your library is scored from local ratings and dates.
+ */
+function overlapFromCredits(credits: PersonCredit[]): OverlapEntry[] {
+  const index = need();
+
+  return credits
+    .flatMap((credit) => {
+      const mediaType = credit.media_type;
+      if (mediaType !== 'movie' && mediaType !== 'tv') return [];
+
+      const at = index.titleIndexByKey.get(titleKey(mediaType, credit.id));
+      const row = at === undefined ? undefined : index.data.titles[at];
+      if (!row || !row[8]) return [];
+
+      const episodeCount = credit.episode_count ?? null;
+      const billingOrder = credit.order ?? null;
+      const { score, basis } = scoreCredit({
+        mediaType,
+        billingOrder,
+        episodeCount,
+        rating: row[9],
+        watchedAt: row[10],
+        popularity: row[7],
+      });
+
+      return [
+        {
+          ...toTitleCard(row),
+          character: credit.character ?? null,
+          episodeCount,
+          billingOrder,
+          watchedAt: row[10],
+          sources: row[11].split(',').filter(Boolean),
+          score,
+          basis,
+        },
+      ];
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+async function getPerson(personId: number): Promise<PersonDetail> {
+  const index = need();
+  const local = index.personById.get(personId);
+
+  let name = local?.[1] ?? null;
+  let photo = local?.[2] ?? null;
+  let biography = '';
+  let knownFor: string | null = null;
+  let seen = localOverlap(personId);
+  let rest: TitleCard[] = [];
+
+  if (tmdbAvailable()) {
+    try {
+      const [person, credits] = await Promise.all([
+        tmdb.getPerson(personId),
+        tmdb.getPersonCredits(personId),
+      ]);
+
+      name = person.name;
+      photo = person.profile_path ?? photo;
+      biography = person.biography ?? '';
+      knownFor = person.known_for_department ?? null;
+
+      // The index is authoritative when it knows them — it holds aggregated
+      // episode counts that a combined-credits row does not. Fall back to
+      // TMDB's list only for someone it has never indexed.
+      if (seen.length === 0) seen = overlapFromCredits(credits);
+
+      const already = new Set(seen.map((entry) => `${entry.mediaType}:${entry.tmdbId}`));
+      rest = credits
+        .flatMap((credit): TitleCard[] => {
+          const mediaType = credit.media_type;
+          if (mediaType !== 'movie' && mediaType !== 'tv') return [];
+          if (already.has(`${mediaType}:${credit.id}`)) return [];
+          return [
+            {
+              tmdbId: credit.id,
+              mediaType,
+              name: nameOf(credit),
+              year: yearOf(credit),
+              poster: img(credit.poster_path ?? null, 'w185'),
+              watched: false,
+              rating: null,
+            },
+          ];
+        })
+        .sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+    } catch {
+      // Offline, or TMDB is having a moment. What the snapshot knows still stands.
+    }
+  }
+
+  if (name === null) {
+    throw new Error("That person isn't in this snapshot, and there's no connection.");
+  }
+
+  return { personId, name, photo: img(photo, 'h632'), biography, knownFor, seen, rest };
 }
 
 // ---------------------------------------------------------------------------
@@ -293,12 +513,9 @@ export const staticApi = {
       .slice(0, 24)
       .map(toTitleCard),
 
-  search: async (q: string) => ({
-    titles: searchTitles(q, 24),
-    people: searchPeopleRows(q, 24),
-  }),
+  search: mergedSearch,
 
-  searchPeople: async (q: string) => searchPeopleRows(q, 40),
+  searchPeople: async (q: string) => (await mergedSearch(q)).people,
 
   title: async (mediaType: MediaType, id: number) => getTitle(mediaType, id),
   person: async (id: number) => getPerson(id),

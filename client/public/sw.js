@@ -12,12 +12,16 @@
  * in IndexedDB, which is where the app reads it from.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = `shell-${VERSION}`;
 const IMAGES = `tmdb-images-${VERSION}`;
+const TMDB_API = `tmdb-api-${VERSION}`;
 
 /** Roughly a few hundred posters and faces — a handful of megabytes. */
 const IMAGE_LIMIT = 600;
+
+/** Search results, casts and filmographies you have already looked at. */
+const TMDB_API_LIMIT = 300;
 
 const BASE = new URL(self.registration.scope).pathname;
 const INDEX = `${BASE}index.html`;
@@ -38,7 +42,7 @@ self.addEventListener('activate', (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name !== SHELL && name !== IMAGES)
+            .filter((name) => name !== SHELL && name !== IMAGES && name !== TMDB_API)
             .map((name) => caches.delete(name)),
         ),
       )
@@ -87,6 +91,26 @@ async function staleWhileRevalidate(request, cacheName, fallbackTo) {
   return hit ?? (await network) ?? Response.error();
 }
 
+/**
+ * Fresh when there is a connection, and still there when there isn't. Used for
+ * TMDB lookups so a film you opened on the train is readable in the tunnel.
+ */
+async function networkFirst(request, cacheName, limit) {
+  const cache = await caches.open(cacheName);
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+      if (limit) void trim(cache, limit);
+    }
+    return response;
+  } catch (err) {
+    const hit = await cache.match(request);
+    if (hit) return hit;
+    throw err;
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
@@ -95,6 +119,11 @@ self.addEventListener('fetch', (event) => {
 
   if (url.hostname === 'image.tmdb.org') {
     event.respondWith(cacheFirst(request, IMAGES, IMAGE_LIMIT));
+    return;
+  }
+
+  if (url.hostname === 'api.themoviedb.org') {
+    event.respondWith(networkFirst(request, TMDB_API, TMDB_API_LIMIT));
     return;
   }
 
