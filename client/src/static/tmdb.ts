@@ -15,23 +15,29 @@ import type {
  * watched is this face in*, is still answered locally, because the credit index
  * on the device is keyed by the same TMDB person ids.
  *
- * The key is compiled into the bundle and is therefore public. A v3 key is
- * read-only and grants nothing but catalogue reads, so the exposure is quota,
- * not data — and it is regenerated in two minutes at
- * themoviedb.org/settings/api if it is ever abused.
+ * The key arrives inside the encrypted snapshot rather than compiled into the
+ * bundle, so nothing published is readable without the passphrase. That does
+ * mean TMDB is unreachable until the library has been unlocked — which the app
+ * already requires before it will render anything at all.
  */
 
-const KEY: string = import.meta.env.VITE_TMDB_KEY ?? '';
 const BASE = 'https://api.themoviedb.org/3';
 
-/** False on a build with no key compiled in, which keeps the app offline-only. */
-export const tmdbAvailable = (): boolean => KEY.length > 0;
+let key = '';
+
+/** Called as the decrypted snapshot is installed; before that there is no key. */
+export function setTmdbKey(next: string | undefined): void {
+  key = (next ?? '').trim();
+}
+
+/** False when the snapshot carried no key, which keeps the app offline-only. */
+export const tmdbAvailable = (): boolean => key.length > 0;
 
 async function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
-  if (!tmdbAvailable()) throw new Error('This build has no TMDB key.');
+  if (!tmdbAvailable()) throw new Error('This snapshot carries no TMDB key.');
 
   const url = new URL(`${BASE}/${path}`);
-  url.searchParams.set('api_key', KEY);
+  url.searchParams.set('api_key', key);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
   const response = await fetch(url, { headers: { accept: 'application/json' } });

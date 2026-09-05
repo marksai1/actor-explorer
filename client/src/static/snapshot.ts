@@ -39,6 +39,8 @@ export type CreditRow = [
 export interface Library {
   version: number;
   generatedAt: string;
+  /** Decrypted with everything else, so it is never published in the clear. */
+  tmdbKey?: string;
   counts: { movies: number; shows: number; people: number; indexed: number };
   sources: { id: string; lastOkAt: string | null; titleCount: number }[];
   titles: TitleRow[];

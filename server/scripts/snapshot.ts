@@ -55,6 +55,11 @@ console.log(
     `${snapshot.credits.length.toLocaleString()} credits`,
 );
 console.log(`  Snapshot JSON: ${size(Buffer.byteLength(json))}`);
+console.log(
+  snapshot.tmdbKey
+    ? '  TMDB key:      included, so the phone can look past your own library'
+    : '  TMDB key:      absent, so the published app will be offline-only',
+);
 
 if (plainOnly) {
   const target = path.join(DATA_DIR, 'snapshot.json');

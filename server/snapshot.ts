@@ -1,5 +1,6 @@
 import { db } from './db.ts';
 import type { MediaType } from './db.ts';
+import { config } from './config.ts';
 
 /**
  * The offline snapshot.
@@ -49,6 +50,17 @@ export type CreditRow = [
 export interface Snapshot {
   version: number;
   generatedAt: string;
+  /**
+   * The TMDB key, carried inside the encrypted payload rather than compiled
+   * into the bundle.
+   *
+   * The published app needs it to reach anything outside your library, and a
+   * static host has nowhere to hide a secret at runtime. Putting it here means
+   * the one thing already guarding your library guards this too: what gets
+   * published is the app, which contains nothing, and one opaque blob. Empty
+   * when TMDB_API_KEY is unset, which yields an offline-only build.
+   */
+  tmdbKey: string;
   counts: { movies: number; shows: number; people: number; indexed: number };
   sources: { id: string; lastOkAt: string | null; titleCount: number }[];
   titles: TitleRow[];
@@ -162,6 +174,7 @@ export function buildSnapshot(): Snapshot {
   return {
     version: SNAPSHOT_VERSION,
     generatedAt: new Date().toISOString(),
+    tmdbKey: config.tmdbKey,
     counts: {
       movies: counts.find((c) => c.media_type === 'movie')?.n ?? 0,
       shows: counts.find((c) => c.media_type === 'tv')?.n ?? 0,

@@ -2,7 +2,7 @@ import { scoreCredit } from '../../../server/scoring.ts';
 import { castRole, nameOf, yearOf } from '../../../server/tmdb-shapes.ts';
 import type { PersonCredit, TmdbTitle } from '../../../server/tmdb-shapes.ts';
 import * as tmdb from './tmdb';
-import { tmdbAvailable } from './tmdb';
+import { setTmdbKey, tmdbAvailable } from './tmdb';
 import { mediaTypeOf, titleKey, type CreditRow, type Indexed, type TitleRow } from './snapshot';
 import type {
   CastEntry,
@@ -37,6 +37,9 @@ let library: Indexed | null = null;
 
 export function setLibrary(next: Indexed): void {
   library = next;
+  // The key rides inside the snapshot, so TMDB becomes reachable at exactly the
+  // moment the library does — and not before.
+  setTmdbKey(next.data.tmdbKey);
 }
 
 /** When the loaded snapshot was built, for the freshness line in Settings. */
@@ -179,8 +182,8 @@ function remoteTitleCard(item: TmdbTitle): TitleCard | null {
 /**
  * Your library first, then the rest of TMDB behind it.
  *
- * Offline, or on a build with no key, this is the snapshot alone — which finds
- * everything you have watched and every face already indexed. With a
+ * Offline, or on a snapshot carrying no key, this is the snapshot alone — which
+ * finds everything you have watched and every face already indexed. With a
  * connection it also reaches the film you started twenty minutes ago.
  */
 async function mergedSearch(query: string): Promise<{ titles: TitleCard[]; people: PersonCard[] }> {

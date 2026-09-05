@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,27 +6,14 @@ import { fileURLToPath } from 'node:url';
 import base from './vite.config';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..');
 
 /**
- * The TMDB key, compiled into the bundle.
+ * Nothing secret is compiled in.
  *
- * Without it the published app is its own library and nothing else; with it,
- * search reaches the whole catalogue and a film you have never watched opens
- * its cast, which is the case the app is most useful in. A v3 key is read-only
- * and grants no access to anything of yours, but it *is* readable in the
- * published page, so this says so out loud on every build rather than letting
- * it happen quietly. CI passes it in the environment; locally it comes from
- * .env, which is gitignored.
+ * The TMDB key the published app needs to look past your own library travels
+ * inside the encrypted snapshot instead, so this bundle is identical whoever
+ * builds it and there is nothing in it worth reading. See `server/snapshot.ts`.
  */
-const env = loadEnv('production', root, '');
-const TMDB_KEY = (process.env.TMDB_API_KEY ?? env.TMDB_API_KEY ?? '').trim();
-
-console.log(
-  TMDB_KEY
-    ? '\n  TMDB key is being compiled into this build — it is readable by anyone who opens the page.\n'
-    : '\n  No TMDB key found: this build will be offline-only, limited to your own library.\n',
-);
 
 /**
  * The published build: no server behind it, everything answered from the
@@ -65,7 +52,6 @@ export default defineConfig({
   plugins: [react(), spaFallback(outDir)],
   define: {
     'import.meta.env.VITE_STATIC': JSON.stringify('1'),
-    'import.meta.env.VITE_TMDB_KEY': JSON.stringify(TMDB_KEY),
   },
   build: {
     outDir,

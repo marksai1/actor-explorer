@@ -122,13 +122,14 @@ rest. Everything the ranking depends on is local, and the phone imports the very
 `server/scoring.ts` the desktop uses, so the two cannot disagree about where you know
 someone from.
 
-**The TMDB key is compiled into the published bundle**, which is what makes the live
-half possible on a static host. A v3 key is read-only and grants no access to anything
-of yours — the exposure is your request quota, not your data — and regenerating one at
-[themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) takes two
-minutes if it is ever abused. Every static build prints a line saying whether a key is
-going in, so it never happens quietly. Leave `TMDB_API_KEY` unset and you get an
-offline-only build with no key in it at all.
+**The TMDB key travels inside the encrypted snapshot**, not in the bundle. A static
+host has nowhere to keep a secret at runtime, and compiling the key into the JavaScript
+would publish it to anyone who opened the page — so it rides along with the library
+instead and is decrypted with it. What gets published is an app containing nothing and
+one opaque blob, and the passphrase that guards your watch history guards the key too.
+The practical consequence is that TMDB is unreachable until the library is unlocked,
+which the app already requires before it renders anything. `npm run snapshot` prints
+whether a key went in; leave `TMDB_API_KEY` unset and you get an offline-only build.
 
 **It is read-only.** Sync, imports, "needs a look" and *Mark as seen* all belong to the
 machine that holds the database; the published copy hides them rather than offering
@@ -151,10 +152,10 @@ cache, which is a build-time convenience and does not travel.
 1. Push this repository to GitHub. It is safe to make public — `.env` and `.data/` are
    gitignored, and nothing else contains a key, a handle or an id.
 2. **Settings → Pages → Source: GitHub Actions.**
-3. `gh secret set TMDB_API_KEY` from this folder. CI builds from a clean checkout with
-   no `.env`, so the key reaches it this way; skip it for an offline-only build.
-4. `npm run snapshot`, commit `client/public/data/` — both files — and push.
-5. The workflow builds and deploys. Your URL is `https://<you>.github.io/<repo>/`.
+3. `npm run snapshot`, commit `client/public/data/` — both files — and push.
+4. The workflow builds and deploys. Your URL is `https://<you>.github.io/<repo>/`.
+
+CI needs no secrets at all: the only thing it handles is ciphertext.
 
 `BASE_PATH` is taken from the repository name automatically, so a rename needs no
 edit. On a custom domain or a `<you>.github.io` user site, set `BASE_PATH=/`.
